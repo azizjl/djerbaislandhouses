@@ -8,6 +8,15 @@ const Bookings = () => {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [currencies, setCurrencies] = useState([
+    { code: 'TND', rate: 1, name: 'Tunisian Dinar' },
+    { code: 'EUR', rate: 0.29, name: 'Euro' },
+    { code: 'USD', rate: 0.32, name: 'US Dollar' }
+  ])
+  const [selectedCurrency, setSelectedCurrency] = useState(
+    localStorage.getItem('selectedCurrency') || 'TND'
+  )
+  const [lastUpdated, setLastUpdated] = useState(null)
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -53,6 +62,54 @@ const Bookings = () => {
     fetchBookings()
   }, [user])
 
+  useEffect(() => {
+    const fetchCurrencies = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('currencies, updated_at')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .single()
+        
+        if (error) {
+          console.error('Error fetching currencies:', error)
+          return
+        }
+        
+        if (data?.currencies && data.currencies.length > 0) {
+          setCurrencies(data.currencies)
+          setLastUpdated(data.updated_at)
+        }
+      } catch (error) {
+        console.error('Error fetching currencies:', error)
+      }
+    }
+
+    fetchCurrencies()
+  }, [])
+
+  const handleCurrencyChange = (e) => {
+    const newCurrency = e.target.value
+    setSelectedCurrency(newCurrency)
+    localStorage.setItem('selectedCurrency', newCurrency)
+  }
+
+  const formatPrice = (priceInTND) => {
+    if (!priceInTND) return '0 TND'
+    
+    const currency = currencies.find(c => c.code === selectedCurrency)
+    if (!currency) return `${priceInTND} TND`
+    
+    const convertedPrice = priceInTND * currency.rate
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.code,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(convertedPrice)
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -87,18 +144,38 @@ const Bookings = () => {
                 </svg>
                 Properties
               </Link>
-              <Link to="/contact" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
+              {/* <Link to="/contact" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
                 <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
                 </svg>
                 Contact
-              </Link>
+              </Link> */}
               <Link to="/bookings" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
                 <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
                 My Bookings
               </Link>
+              <div className="flex flex-col">
+                <div className="relative">
+                  <select
+                    value={selectedCurrency || ''}
+                    onChange={handleCurrencyChange}
+                    className="px-3 py-1.5 bg-white text-[#1B4965] border-[#1B4965] border rounded-lg appearance-none cursor-pointer pr-8"
+                  >
+                    {currencies.map(currency => (
+                      <option key={currency.code} value={currency.code}>
+                        {currency.code}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-2 flex items-center pointer-events-none">
+                    <svg className="w-4 h-4 text-[#1B4965]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
               <button 
                 onClick={async () => {
                   await supabase.auth.signOut()
@@ -200,45 +277,72 @@ const Bookings = () => {
               <p className="text-gray-500">You don't have any bookings yet.</p>
             </div>
           ) : (
-            bookings.map((booking) => (
-              <div key={booking.id} className="bg-white rounded-lg shadow overflow-hidden">
-                <Link to={`/bookings/${booking.id}`} className="block hover:bg-gray-50 transition-colors">
-                  <div className="p-6 flex flex-col md:flex-row gap-6">
-                    <div className="w-full md:w-1/4">
-                      <img
-                        src={booking.accommodations.images[0]?.url || '/placeholder.jpg'}
-                        alt={booking.accommodations.name}
-                        className="w-full h-48 object-cover rounded-lg"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-xl font-semibold text-[#1B4965] mb-2">
-                        {booking.accommodations.name}
-                      </h3>
-                      <p className="text-gray-600 mb-4">{booking.accommodations.location}</p>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm text-gray-500">Check-in</p>
-                          <p className="font-medium">{new Date(booking.check_in_date).toLocaleDateString()}</p>
+            bookings.map((booking) => {
+              const bookingDate = new Date(booking.created_at);
+              const currentDate = new Date();
+              const daysSinceBooking = Math.floor((currentDate - bookingDate) / (1000 * 60 * 60 * 24));
+              const showPaymentWarning = daysSinceBooking >= 3 && booking.status === 'pending';
+
+              return (
+                <div key={booking.id} className="bg-white rounded-lg shadow overflow-hidden">
+                  <Link to={`/bookings/${booking.id}`} className="block hover:bg-gray-50 transition-colors">
+                    <div className="p-6 flex flex-col md:flex-row gap-6">
+                      <div className="w-full md:w-1/4">
+                        <img
+                          src={booking.accommodations.images[0]?.url || '/placeholder.jpg'}
+                          alt={booking.accommodations.name}
+                          className="w-full h-48 object-cover rounded-lg"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-xl font-semibold text-[#1B4965] mb-2">
+                          {booking.accommodations.name}
+                        </h3>
+                        <p className="text-gray-600 mb-4">{booking.accommodations.location}</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-gray-500">Check-in</p>
+                            <p className="font-medium">
+                              {booking.start_date ? new Date(booking.start_date).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
+                              }) : 'N/A'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Check-out</p>
+                            <p className="font-medium">
+                              {booking.end_date ? new Date(booking.end_date).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
+                              }) : 'N/A'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Total Price</p>
+                            <p className="font-medium">{formatPrice(booking.total_price)}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Status</p>
+                            <p className="font-medium capitalize">{booking.status}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm text-gray-500">Check-out</p>
-                          <p className="font-medium">{new Date(booking.check_out_date).toLocaleDateString()}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-500">Total Price</p>
-                          <p className="font-medium">${booking.total_price}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-500">Status</p>
-                          <p className="font-medium capitalize">{booking.status}</p>
-                        </div>
+                        
+                        {showPaymentWarning && (
+                          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                            <p className="text-red-600 text-sm">
+                              ⚠️ No payment has been received for this booking after 3 days. Please complete your payment to confirm your reservation.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                </Link>
-              </div>
-            ))
+                  </Link>
+                </div>
+              )
+            })
           )}
         </div>
       </div>

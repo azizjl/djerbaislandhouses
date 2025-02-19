@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../config/supabase'
 import { BedOutline, WaterOutline, ExpandOutline, LocationOutline } from 'react-ionicons'
+import useAuthStore  from '../stores/authStore'
+import "../App.css"
 
 const formatTND = (amount) => {
   return new Intl.NumberFormat('ar-TN', {
@@ -16,11 +18,78 @@ const Houses = () => {
   const [allProperties, setAllProperties] = useState([])
   const [filteredProperties, setFilteredProperties] = useState([])
   const [loading, setLoading] = useState(true)
+  const [searchParams] = useSearchParams()
   const [searchFilters, setSearchFilters] = useState({
-    location: '',
-    priceRange: '',
-    bedrooms: ''
+    location: searchParams.get('location') || '',
+    priceRange: searchParams.get('priceRange') || '',
+    bedrooms: searchParams.get('bedrooms') || '',
+    startDate: searchParams.get('startDate') || '',
+    endDate: searchParams.get('endDate') || ''
   })
+  const [currencies, setCurrencies] = useState([])
+  const [selectedCurrency, setSelectedCurrency] = useState(
+    localStorage.getItem('selectedCurrency') || 'TND'
+  )
+  const [lastUpdated, setLastUpdated] = useState(null)
+  const [isScrolled, setIsScrolled] = useState(false)
+  const { role } = useAuthStore()
+  const [bookings, setBookings] = useState([]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 0)
+    }
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  useEffect(() => {
+    const fetchCurrencies = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('currencies, updated_at')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .single()
+        
+        if (error) {
+          console.error('Error fetching currencies:', error)
+          return
+        }
+        
+        if (data?.currencies && data.currencies.length > 0) {
+          setCurrencies(data.currencies)
+          setLastUpdated(data.updated_at)
+        }
+      } catch (error) {
+        console.error('Error fetching currencies:', error)
+      }
+    }
+
+    fetchCurrencies()
+  }, [])
+
+  const handleCurrencyChange = (e) => {
+    const newCurrency = e.target.value
+    setSelectedCurrency(newCurrency)
+    localStorage.setItem('selectedCurrency', newCurrency)
+  }
+
+  const formatPrice = (priceInTND) => {
+    if (!priceInTND) return '0 TND'
+    
+    const currency = currencies.find(c => c.code === selectedCurrency)
+    if (!currency) return `${priceInTND} TND`
+    
+    const convertedPrice = priceInTND * currency.rate
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.code,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(convertedPrice)
+  }
 
   useEffect(() => {
     const fetchHouses = async () => {
@@ -37,27 +106,24 @@ const Houses = () => {
               url
             )
           `)
+          .eq('on_service', true)
         
         if (error) throw error
         
-        const transformedData = data.map(property => {
-          const currentMonth = new Date().getMonth() + 1
-          const currentMonthPrice = property.prices?.find(p => 
-            parseInt(p.month) === currentMonth
-          )?.price_per_day || 0
-
-          return {
-            id: property.id,
-            title: property.name,
-            location: property.location,
-            bedrooms: property.bedrooms,
-            bathrooms: property.bathrooms,
-            sqft: property.capacity,
-            price_per_night: currentMonthPrice,
-            image_url: property.images?.[0]?.url || '/default-image.jpg',
-            type: property.type
-          }
-        })
+        const transformedData = data.map(property => ({
+          id: property.id,
+          title: property.name,
+          location: property.location,
+          bedrooms: property.bedrooms,
+          bathrooms: property.bathrooms,
+          sqft: property.capacity,
+          price_per_night: property.prices?.find(p => 
+            parseInt(p.month) === new Date().getMonth() + 1
+          )?.price_per_day || 0,
+          image_url: property.images?.[0]?.url || '/default-image.jpg',
+          type: property.type,
+          on_service: property.on_service
+        }))
         
         setAllProperties(transformedData)
         setFilteredProperties(transformedData)
@@ -70,6 +136,17 @@ const Houses = () => {
 
     fetchHouses()
   }, [])
+
+  useEffect(() => {
+    if (allProperties.length > 0 && 
+        (searchParams.get('location') || 
+         searchParams.get('priceRange') || 
+         searchParams.get('bedrooms') || 
+         searchParams.get('startDate') || 
+         searchParams.get('endDate'))) {
+      handleSearchSubmit(new Event('submit'))
+    }
+  }, [allProperties])
 
   const getUniqueLocations = () => {
     const locations = allProperties.map(property => 
@@ -108,7 +185,9 @@ const Houses = () => {
     setSearchFilters({
       location: '',
       priceRange: '',
-      bedrooms: ''
+      bedrooms: '',
+      startDate: '',
+      endDate: ''
     })
     setFilteredProperties(allProperties)
   }
@@ -138,8 +217,51 @@ const Houses = () => {
       )
     }
 
+    if (searchFilters.startDate && searchFilters.endDate) {
+      results = results.filter(property =>
+        isPropertyAvailable(property.id, searchFilters.startDate, searchFilters.endDate)
+      )
+    }
+
     setFilteredProperties(results)
   }
+
+  useEffect(() => {
+    const fetchBookings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('*')
+        
+        if (error) throw error;
+        setBookings(data);
+      } catch (error) {
+        console.error('Error fetching bookings:', error);
+      }
+    };
+
+    fetchBookings();
+  }, []);
+
+  const isPropertyAvailable = (propertyId, startDate, endDate) => {
+    if (!startDate || !endDate) return true;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    return !bookings.some(booking => {
+      if (booking.accommodation_id !== propertyId) return false;
+      
+      const bookingStart = new Date(booking.start_date);
+      const bookingEnd = new Date(booking.end_date);
+      
+      return (
+        (start <= bookingEnd && start >= bookingStart) ||
+        (end <= bookingEnd && end >= bookingStart) ||
+        (start <= bookingStart && end >= bookingEnd)
+      );
+    });
+  };
 
   if (loading) {
     return (
@@ -151,26 +273,71 @@ const Houses = () => {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-      <nav className="bg-white/90 backdrop-blur-md sticky top-0 z-50 shadow-sm">
+      {/* Updated Navigation */}
+      <nav className={`fixed w-full top-0 z-50 transition-colors duration-300 ${
+        isScrolled ? 'bg-white/90 backdrop-blur-md shadow-sm' : 'bg-white/90 backdrop-blur-md shadow-sm'
+      }`}>
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex justify-between h-20">
             <div className="flex items-center">
               <Link to="/" className="text-3xl font-light tracking-tight text-[#1B4965]">
-                Djerba<span className="font-bold text-[#62B6CB]">Stays</span>
+                DjerbaIsland<span className="font-bold text-[#62B6CB]">Houses</span>
               </Link>
+            </div>
+
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center space-x-8">
+              <Link to="/" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
+                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                </svg>
+                Home
+              </Link>
+              {/* <Link to="/houses" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
+                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                </svg>
+                Properties
+              </Link> */}
+              
+              {/* Currency Selector */}
+              <div className="flex flex-col">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-2 flex items-center pointer-events-none">
+                    <svg className="w-5 h-5 text-[#1B4965]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                  </div>
+                  <select
+                    value={selectedCurrency}
+                    onChange={handleCurrencyChange}
+                    className="pl-9 pr-3 py-1.5 rounded-lg border text-[#1B4965] border-[#1B4965] bg-transparent focus:outline-none focus:ring-2 focus:ring-[#62B6CB]"
+                  >
+                    {currencies.map(currency => (
+                      <option 
+                        key={currency.code} 
+                        value={currency.code}
+                        className="text-[#1B4965] bg-white"
+                      >
+                        {currency.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </nav>
 
-      {/* Search Section */}
-      <div className="bg-gradient-to-b from-[#CAE9FF] to-white py-12">
+      {/* Updated Search Section */}
+      <div className="bg-gradient-to-b from-[#CAE9FF] to-white py-12 pt-30">
         <div className="max-w-7xl mx-auto px-6">
           <h1 className="text-4xl font-bold text-[#1B4965] mb-8">Find Your Perfect Stay</h1>
           
           <form onSubmit={handleSearchSubmit} className="bg-white p-6 rounded-2xl shadow-xl">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              {/* Location Select */}
               <div className="relative">
                 <select
                   name="location"
@@ -187,6 +354,7 @@ const Houses = () => {
                 </select>
               </div>
 
+              {/* Price Range Select */}
               <div className="relative">
                 <select
                   name="priceRange"
@@ -203,6 +371,7 @@ const Houses = () => {
                 </select>
               </div>
 
+              {/* Bedrooms Select */}
               <div className="relative">
                 <select
                   name="bedrooms"
@@ -218,6 +387,31 @@ const Houses = () => {
                 </select>
               </div>
 
+              {/* Start Date Input */}
+              <div className="relative">
+                <input
+                  type="date"
+                  name="startDate"
+                  value={searchFilters.startDate}
+                  onChange={handleFilterChange}
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-[#62B6CB] focus:ring-2 focus:ring-[#62B6CB]/20 transition-all"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              {/* End Date Input */}
+              <div className="relative">
+                <input
+                  type="date"
+                  name="endDate"
+                  value={searchFilters.endDate}
+                  onChange={handleFilterChange}
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-[#62B6CB] focus:ring-2 focus:ring-[#62B6CB]/20 transition-all"
+                  min={searchFilters.startDate || new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              {/* Search and Reset Buttons */}
               <div className="flex space-x-2">
                 <button
                   type="submit"
@@ -291,7 +485,7 @@ const Houses = () => {
                     </p>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-bold text-[#1B4965]">{formatTND(house.price_per_night)}</div>
+                    <div className="text-lg font-bold text-[#1B4965]">{formatPrice(house.price_per_night)}</div>
                     <div className="text-sm text-[#62B6CB]">per night</div>
                   </div>
                 </div>

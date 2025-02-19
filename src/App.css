@@ -1,0 +1,140 @@
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    visibility: hidden;
+  }
+
+  body > div:first-child {
+    visibility: visible;
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:block {
+    display: block !important;
+  }
+}
+
+
+.stats-section {
+  padding: 5rem 0;
+  background: white;
+  margin-top: -70px;
+  overflow: hidden;
+  position: relative;
+}
+
+.stats-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  overflow: hidden;
+}
+
+.stats-track {
+  display: flex;
+  animation: scroll 20s linear infinite; /* Faster animation */
+  width: fit-content;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 300px); /* Fixed width for cards */
+  gap: 2rem;
+  flex-shrink: 0;
+}
+
+.stat-card {
+  position: relative;
+  height: 320px;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  background: #f8f9fa;
+}
+
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.stat-image-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.stat-image-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stat-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.stat-content {
+  position: relative;
+  padding: 3rem;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 1rem;
+  z-index: 1;
+}
+
+.stat-icon {
+  width: 4rem;
+  height: 4rem;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.icon {
+  width: 2rem;
+  height: 2rem;
+  color: black;
+}
+
+.stat-number {
+  font-size: 3rem;
+  font-weight: 700;
+  color: white;
+  margin: 0.5rem 0;
+}
+
+.stat-label {
+  font-size: 1.25rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+@keyframes scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.stats-container:hover .stats-track {
+  animation-play-state: paused;
+}

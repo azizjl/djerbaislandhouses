@@ -1,13 +1,30 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { supabase } from '../config/supabase'
-import { toast } from 'react-hot-toast'
-import useAuthStore from '../stores/authStore'
-import { DateRange } from 'react-date-range'
-import 'react-date-range/dist/styles.css'
-import 'react-date-range/dist/theme/default.css'
-import { addDays, format } from 'date-fns'
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { supabase } from '../config/supabase';
+import { toast } from 'react-hot-toast';
+import useAuthStore from '../stores/authStore';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
+// Import all dashboard components
+import Overview from '../components/dashboard/Overview';
+import Listings from '../components/dashboard/Listings';
+import Bookings from '../components/dashboard/Bookings';
+import Calendar from '../components/dashboard/Calendar';
+import Messages from '../components/dashboard/Messages';
+import Blog from '../components/dashboard/Blog';
+import Settings from '../components/dashboard/Settings';
+import Rapport from '../components/dashboard/Rapport';
+import Transactions from '../components/dashboard/Transactions';
+import Checkouts from '../components/dashboard/Checkouts';
+import Users from '../components/dashboard/Users';
+import Newsletter from '../components/dashboard/Newsletter';
+
+// Add this helper function before the Dashboard component
+const getCurrentMonthNumber = () => {
+  return (new Date().getMonth() + 1).toString(); // getMonth() returns 0-11, so we add 1
+};
+
+// Add this helper function for currency formatting
 const formatTND = (amount) => {
   return new Intl.NumberFormat('ar-TN', {
     style: 'currency',
@@ -15,39 +32,96 @@ const formatTND = (amount) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount)
-}
+};
 
-const Dashboard = () => {
-  const navigate = useNavigate()
-  const { role } = useAuthStore()
+// Navigation items
+const getNavigationItems = (role) => {
+  // Base items that reception can access
+  const baseItems = [
+    { name: 'Bookings', tab: 'bookings', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+    { name: 'Calendar', tab: 'calendar', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+    { name: 'Messages', tab: 'messages', icon: 'M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4' },
+    { name: 'Checkouts', tab: 'checkouts', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+  ];
 
-  const [activeTab, setActiveTab] = useState('listings')
-  const [listings, setListings] = useState([])
-  const [bookings, setBookings] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [dateRange, setDateRange] = useState([
-    {
-      startDate: new Date(),
-      endDate: addDays(new Date(), 30),
-      key: 'selection'
-    }
-  ])
-  const [calendarBookings, setCalendarBookings] = useState([])
-  const [calendarView, setCalendarView] = useState('month')
-  const [selectedBooking, setSelectedBooking] = useState(null)
-  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false)
+  // Additional items for admin and manager
+  const adminManagerItems = [
+    { name: 'Overview', tab: 'overview', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+    { name: 'Listings', tab: 'listings', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+    { name: 'Blog', tab: 'blog', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z' },
+    { name: 'Settings', tab: 'settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
+    { name: 'Rapport', tab: 'rapport', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+    { name: 'Transactions', tab: 'transactions', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { name: 'Newsletter', tab: 'newsletter', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+  ];
 
+  // Admin-only items
+  const adminOnlyItems = [
+    { name: 'Users', tab: 'users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z' },
+  ];
+
+  if (role === 'admin') {
+    return [...adminManagerItems, ...baseItems, ...adminOnlyItems];
+  } else if (role === 'manager') {
+    return [...adminManagerItems, ...baseItems];
+  } else {
+    return baseItems;
+  }
+};
+
+function Dashboard() {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
+  const [loading, setLoading] = useState(true);
+
+  // State for different data types
+  const [bookings, setBookings] = useState([]);
+  const [listings, setListings] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [blogPosts, setBlogPosts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [rapportData, setRapportData] = useState({});
+  const [currentUser, setCurrentUser] = useState({});
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptUrl, setReceiptUrl] = useState(null);
+
+  const navigate = useNavigate();
+
+  // Add this near the other state declarations
+  const { signOut } = useAuthStore();
+
+  // Fetch data when component mounts
   useEffect(() => {
-    // set timeout to 5 seconds
-      if (role !== 'admin') {
-        navigate('/')
-        return
-      }
-
     const fetchData = async () => {
       try {
-        // Fetch listings
+        setLoading(true);
+        
+        // Fetch current user
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log(!user)
+        if(!user){
+          navigate('/');
+          return;
+        }
+
+        // Fetch user profile with role
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) throw profileError;
+        setCurrentUser({ ...user, ...profile });
+        // Check admin access
+        if (profile.role !== 'admin' && profile.role !== 'reception' && profile.role !== 'manager') {
+          navigate('/');
+          return;
+        }
+
+        // Fetch accommodations (listings)
         const { data: listingsData, error: listingsError } = await supabase
           .from('accommodations')
           .select(`
@@ -58,9 +132,18 @@ const Dashboard = () => {
             images (
               url
             )
-          `)
+          `);
 
-        if (listingsError) throw listingsError
+        if (listingsError) throw listingsError;
+
+        // Transform listings data
+        const transformedListings = listingsData.map(listing => ({
+          ...listing,
+          prices: listing.prices || [],
+          current_price: listing.prices?.find(p => p.month === getCurrentMonthNumber())?.price_per_day || null
+        }));
+
+        setListings(transformedListings);
 
         // Fetch bookings
         const { data: bookingsData, error: bookingsError } = await supabase
@@ -71,637 +154,402 @@ const Dashboard = () => {
               name,
               location,
               images (url)
+            ),
+            profiles (
+              full_name,
+              email,
+              phone_number,
+              address
             )
           `)
-          .order('created_at', { ascending: false })
+          .order('created_at', { ascending: false });
 
-        if (bookingsError) throw bookingsError
+        if (bookingsError) throw bookingsError;
+        setBookings(bookingsData);
 
-        setListings(listingsData)
-        setBookings(bookingsData)
-      } catch (error) {
-        console.error('Error fetching data:', error)
-        toast.error('Failed to load dashboard data')
-      } finally {
-        setLoading(false)
-      }
-    }
+        // Fetch messages
+        const { data: messagesData, error: messagesError } = await supabase
+          .from('contacts')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-    const fetchAllBookings = async () => {
-      try {
-        const { data: bookingsData, error: bookingsError } = await supabase
-          .from('bookings')
+        if (messagesError) throw messagesError;
+        setMessages(messagesData);
+
+        // Fetch blog posts
+        const { data: blogData, error: blogError } = await supabase
+          .from('blog_posts')
           .select(`
             *,
-            accommodations (
-              name,
-              location
+            categories (
+              id,
+              name
             )
           `)
-          .order('start_date', { ascending: true })
+          .order('created_at', { ascending: false });
 
-        if (bookingsError) throw bookingsError
+        if (blogError) throw blogError;
+        setBlogPosts(blogData);
 
-        // Transform bookings for calendar
-        const transformedBookings = bookingsData.map(booking => ({
-          startDate: new Date(booking.start_date),
-          endDate: new Date(booking.end_date),
-          title: `${booking.accommodations.name} - ${booking.status}`,
-          color: getStatusColor(booking.status),
-          key: booking.id.toString()
-        }))
+        // Fetch categories
+        const { data: categoriesData, error: categoriesError } = await supabase
+          .from('categories')
+          .select('*')
+          .order('name');
 
-        setCalendarBookings(transformedBookings)
+        if (categoriesError) throw categoriesError;
+        setCategories(categoriesData);
+
+        // Only fetch users if admin
+        if (profile.role === 'admin') {
+          const { data: usersData, error: usersError } = await supabase
+            .from('profiles')
+            .select('*')
+            .order('updated_at', { ascending: false });
+
+          if (usersError) throw usersError;
+          setUsers(usersData);
+        }
+
+        // Calculate rapport data from bookings
+        const rapportData = {
+          revenue: bookingsData?.reduce((sum, booking) => sum + booking.total_price, 0) || 0,
+          bookings: bookingsData?.length || 0,
+          occupancyRate: calculateOccupancyRate(bookingsData),
+          averageDailyRate: calculateADR(bookingsData),
+          properties: calculatePropertyPerformance(bookingsData, listingsData),
+          revenueGrowth: calculateGrowth(bookingsData, 'revenue'),
+          bookingsGrowth: calculateGrowth(bookingsData, 'bookings'),
+          occupancyGrowth: calculateGrowth(bookingsData, 'occupancy'),
+          adrGrowth: calculateGrowth(bookingsData, 'adr')
+        };
+
+        setRapportData(rapportData);
+
       } catch (error) {
-        console.error('Error fetching bookings:', error)
-        toast.error('Failed to load bookings')
+        console.error('Error fetching data:', error);
+        toast.error('Failed to load dashboard data');
+      } finally {
+        setLoading(false);
       }
-    }
+    };
 
-    fetchData()
-    fetchAllBookings()
-  }, [role, navigate])
+    fetchData();
+  }, [navigate]);
 
-  const handleVerifyBooking = async (bookingId) => {
+  // Event handlers with Supabase
+  const handleDeleteListing = async (listingId) => {
     try {
       const { error } = await supabase
-        .from('bookings')
-        .update({ 
-          status: 'confirmed',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', bookingId)
+        .from('accommodations')
+        .delete()
+        .eq('id', listingId);
 
-      if (error) throw error
-
-      setBookings(prevBookings =>
-        prevBookings.map(booking =>
-          booking.id === bookingId
-            ? { ...booking, status: 'confirmed' }
-            : booking
-        )
-      )
-
-      toast.success('Booking confirmed successfully')
+      if (error) throw error;
+      setListings(listings.filter(listing => listing.id !== listingId));
     } catch (error) {
-      console.error('Error confirming booking:', error)
-      toast.error('Failed to confirm booking')
+      console.error('Error deleting listing:', error);
     }
-  }
+  };
 
-  const handleCancelBooking = async (bookingId) => {
+  const handleUpdateUserRole = async (userId, newRole) => {
     try {
       const { error } = await supabase
-        .from('bookings')
-        .update({ 
-          status: 'cancelled',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', bookingId)
+        .from('profiles')
+        .update({ role: newRole })
+        .eq('id', userId);
 
-      if (error) throw error
-
-      setBookings(prevBookings =>
-        prevBookings.map(booking =>
-          booking.id === bookingId
-            ? { ...booking, status: 'cancelled' }
-            : booking
-        )
-      )
-
-      toast.success('Booking cancelled successfully')
+      if (error) throw error;
+      setUsers(users.map(user => 
+        user.id === userId ? { ...user, role: newRole } : user
+      ));
     } catch (error) {
-      console.error('Error cancelling booking:', error)
-      toast.error('Failed to cancel booking')
+      console.error('Error updating user role:', error);
     }
-  }
+  };
 
-  // Helper function to get color based on booking status
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'confirmed':
-        return '#4CAF50' // green
-      case 'pending':
-        return '#FFC107' // yellow
-      case 'cancelled':
-        return '#F44336' // red
-      default:
-        return '#1B4965' // default blue
+  const handleSavePost = async (post) => {
+    try {
+      if (post.id) {
+        const { error } = await supabase
+          .from('blog_posts')
+          .update(post)
+          .eq('id', post.id);
+
+        if (error) throw error;
+        setBlogPosts(blogPosts.map(p => 
+          p.id === post.id ? post : p
+        ));
+      } else {
+        const { data, error } = await supabase
+          .from('blog_posts')
+          .insert([{ ...post, profiles_id: currentUser.id }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        setBlogPosts([...blogPosts, data]);
+      }
+    } catch (error) {
+      console.error('Error saving post:', error);
     }
-  }
+  };
 
-  // Function to handle booking click
+  // Helper functions for rapport calculations
+  const calculateOccupancyRate = (bookings) => {
+    // Add calculation logic
+    return 0;
+  };
+
+  const calculateADR = (bookings) => {
+    // Add calculation logic
+    return 0;
+  };
+
+  const calculatePropertyPerformance = (bookings, properties) => {
+    // Add calculation logic
+    return [];
+  };
+
+  const calculateGrowth = (data, metric) => {
+    // Add calculation logic
+    return 0;
+  };
+
+  // Event handlers
   const handleBookingClick = (booking) => {
-    setSelectedBooking(booking)
-    setIsBookingModalOpen(true)
-  }
+    // Handle booking click
+    console.log('Booking clicked:', booking);
+  };
 
-  // Function to handle booking status update
-  const handleStatusUpdate = async (bookingId, newStatus) => {
+  // Handle cash payment (from OldDashboard)
+  const handleCashPayment = async (booking) => {
+    const remainingAmount = booking.total_price - (booking.payed_amount || 0);
+    
+    const cashAmount = window.prompt(
+      `Remaining amount: ${formatTND(remainingAmount)}\nEnter cash payment amount:`
+    );
+
+    if (cashAmount === null) return;
+    
+    const amount = parseFloat(cashAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
+    if (amount > remainingAmount) {
+      toast.error(`Amount cannot exceed the remaining balance of ${formatTND(remainingAmount)}`);
+      return;
+    }
+
     try {
+      const newPayedAmount = (Number(booking.payed_amount) || 0) + amount;
       const { error } = await supabase
         .from('bookings')
         .update({ 
-          status: newStatus,
+          payed_amount_cash: (booking.payed_amount_cash || 0) + amount,
+          payed_amount: newPayedAmount,
           updated_at: new Date().toISOString()
         })
-        .eq('id', bookingId)
+        .eq('id', booking.id);
 
-      if (error) throw error
+      if (error) throw error;
 
-      // Update local state
-      setCalendarBookings(prevBookings =>
-        prevBookings.map(booking =>
-          booking.key === bookingId.toString()
-            ? { ...booking, color: getStatusColor(newStatus) }
-            : booking
+      setBookings(prevBookings =>
+        prevBookings.map(b =>
+          b.id === booking.id
+            ? {
+                ...b,
+                payed_amount_cash: (b.payed_amount_cash || 0) + amount,
+                payed_amount: newPayedAmount
+              }
+            : b
         )
-      )
+      );
 
-      toast.success(`Booking ${newStatus} successfully`)
-      setIsBookingModalOpen(false)
+      toast.success(`Cash payment of ${formatTND(amount)} recorded successfully`);
     } catch (error) {
-      console.error('Error updating booking:', error)
-      toast.error('Failed to update booking')
+      console.error('Error recording cash payment:', error);
+      toast.error('Failed to record cash payment');
     }
-  }
+  };
 
-  // Enhanced calendar content
-  const renderCalendarContent = () => (
-    <div className="bg-white rounded-xl shadow-sm">
-      {/* Calendar Header */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-semibold text-[#1B4965]">Booking Calendar</h2>
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => setCalendarView('month')}
-              className={`px-4 py-2 rounded-lg font-medium ${
-                calendarView === 'month'
-                  ? 'bg-[#1B4965] text-white'
-                  : 'text-[#1B4965] hover:bg-gray-100'
-              }`}
-            >
-              Month View
-            </button>
-            <button
-              onClick={() => setCalendarView('week')}
-              className={`px-4 py-2 rounded-lg font-medium ${
-                calendarView === 'week'
-                  ? 'bg-[#1B4965] text-white'
-                  : 'text-[#1B4965] hover:bg-gray-100'
-              }`}
-            >
-              Week View
-            </button>
-          </div>
-        </div>
+  // Update the handleLogout function
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      signOut();  // Call the logout function from the store
+      navigate('/');
+      toast.success('Logged out successfully');
+    } catch (error) {
+      console.error('Error logging out:', error);
+      toast.error('Failed to log out');
+    }
+  };
 
-        {/* Legend */}
-        <div className="flex flex-wrap gap-6">
-          <div className="flex items-center">
-            <div className="w-4 h-4 rounded-full bg-[#4CAF50] mr-2"></div>
-            <span className="text-sm">Confirmed</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-4 h-4 rounded-full bg-[#FFC107] mr-2"></div>
-            <span className="text-sm">Pending</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-4 h-4 rounded-full bg-[#F44336] mr-2"></div>
-            <span className="text-sm">Cancelled</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-4 h-4 rounded-full bg-[#1B4965] mr-2"></div>
-            <span className="text-sm">Selected Range</span>
-          </div>
-        </div>
-      </div>
+  // Replace the navigationItems constant with:
+  const navigationItems = getNavigationItems(currentUser.role);
 
-      {/* Calendar */}
-      <div className="p-6">
-        <DateRange
-          onChange={item => {
-            setDateRange([item.selection])
-            // Check if clicked date has a booking
-            const clickedDate = item.selection.startDate
-            const booking = calendarBookings.find(b => 
-              clickedDate >= b.startDate && clickedDate <= b.endDate
-            )
-            if (booking) {
-              handleBookingClick(booking)
-            }
-          }}
-          moveRangeOnFirstSelection={false}
-          ranges={[...dateRange, ...calendarBookings]}
-          months={calendarView === 'month' ? 2 : 1}
-          direction="horizontal"
-          className="border border-gray-200 rounded-lg"
-          rangeColors={['#1B4965']}
-          minDate={new Date()}
-          showMonthAndYearPickers={true}
-          showDateDisplay={false}
-          showPreview={false}
-          scroll={{ enabled: true }}
-          monthDisplayFormat="MMMM yyyy"
-          weekdayDisplayFormat="E"
-          dayDisplayFormat="d"
-        />
-      </div>
-
-      {/* Booking Details Modal */}
-      {isBookingModalOpen && selectedBooking && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
-            <h3 className="text-xl font-semibold mb-4">{selectedBooking.title.split(' - ')[0]}</h3>
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm text-gray-600">Check-in</p>
-                <p className="font-medium">{format(selectedBooking.startDate, 'PPP')}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">Check-out</p>
-                <p className="font-medium">{format(selectedBooking.endDate, 'PPP')}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">Status</p>
-                <div 
-                  className="inline-block px-3 py-1 rounded-full text-sm text-white mt-1"
-                  style={{ backgroundColor: selectedBooking.color }}
-                >
-                  {selectedBooking.title.split(' - ')[1]}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex space-x-3 mt-6">
-                {selectedBooking.title.split(' - ')[1] !== 'confirmed' && (
-                  <button
-                    onClick={() => handleStatusUpdate(selectedBooking.key, 'confirmed')}
-                    className="flex-1 px-4 py-2 bg-[#4CAF50] text-white rounded-lg hover:bg-opacity-90 transition-colors"
-                  >
-                    Confirm
-                  </button>
-                )}
-                {selectedBooking.title.split(' - ')[1] !== 'cancelled' && (
-                  <button
-                    onClick={() => handleStatusUpdate(selectedBooking.key, 'cancelled')}
-                    className="flex-1 px-4 py-2 bg-[#F44336] text-white rounded-lg hover:bg-opacity-90 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-              <button
-                onClick={() => setIsBookingModalOpen(false)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors mt-3"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bookings List */}
-      <div className="p-6 border-t border-gray-200">
-        <h3 className="text-lg font-semibold mb-4">Upcoming Bookings</h3>
-        <div className="space-y-4">
-          {bookings
-            .filter(booking => new Date(booking.start_date) >= new Date())
-            .sort((a, b) => new Date(a.start_date) - new Date(b.start_date))
-            .slice(0, 5)
-            .map(booking => (
-              <div
-                key={booking.id}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
-                onClick={() => handleBookingClick({
-                  startDate: new Date(booking.start_date),
-                  endDate: new Date(booking.end_date),
-                  title: `${booking.accommodations.name} - ${booking.status}`,
-                  color: getStatusColor(booking.status),
-                  key: booking.id.toString()
-                })}
-              >
-                <div>
-                  <p className="font-medium">{booking.accommodations.name}</p>
-                  <p className="text-sm text-gray-600">
-                    {format(new Date(booking.start_date), 'PP')} - {format(new Date(booking.end_date), 'PP')}
-                  </p>
-                </div>
-                <div
-                  className="px-3 py-1 rounded-full text-sm text-white"
-                  style={{
-                    backgroundColor: getStatusColor(booking.status)
-                  }}
-                >
-                  {booking.status}
-                </div>
-              </div>
-            ))}
-          {bookings.filter(booking => new Date(booking.start_date) >= new Date()).length === 0 && (
-            <p className="text-gray-500 text-center py-4">No upcoming bookings</p>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1B4965]"></div>
-      </div>
-    )
-  }
+  // Update tab handling
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navigation */}
-      <nav className="bg-white/90 backdrop-blur-md sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex justify-between h-20">
-            <div className="flex items-center">
-              <Link to="/" className="text-3xl font-light tracking-tight text-[#1B4965]">
-                DjerbaIsland<span className="font-bold text-[#62B6CB]">Houses</span>
-              </Link>
-            </div>
-
-            {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center space-x-8">
-              <Link to="/" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
-                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-                </svg>
-                Home
-              </Link>
-              <Link to="/houses" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
-                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                </svg>
-                Properties
-              </Link>
-              <Link to="/contact" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
-                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                </svg>
-                Contact
-              </Link>
-              <Link to="/dashboard" className="flex items-center text-[#1B4965] hover:text-[#62B6CB] transition-colors">
-                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                </svg>
-                Dashboard
-              </Link>
-              <button 
-                onClick={async () => {
-                  await supabase.auth.signOut()
-                  navigate('/auth')
-                }} 
-                className="px-6 py-2.5 text-white bg-[#1B4965] rounded-full hover:bg-[#62B6CB] transition-colors duration-300 flex items-center"
-              >
-                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-                </svg>
-                Sign Out
-              </button>
-            </div>
-
-            {/* Mobile menu button */}
-            <div className="md:hidden flex items-center">
+    <div className="min-h-screen bg-gray-100">
+      {/* Sidebar */}
+      <div className={`
+        fixed top-0 left-0 h-full w-64 bg-white shadow-lg transform transition-transform duration-200 ease-in-out z-30
+        ${isMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="p-6">
+          <h1 className="text-2xl font-bold text-[#1B4965]">Dashboard</h1>
+        </div>
+        <nav className="mt-6 flex flex-col h-[calc(100%-88px)] justify-between">
+          <div className="px-4 space-y-1">
+            {navigationItems.map((item) => (
               <button
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="text-[#1B4965] hover:text-[#62B6CB] focus:outline-none"
+                key={item.tab}
+                onClick={() => handleTabChange(item.tab)}
+                className={`
+                  w-full flex items-center px-4 py-2 text-sm font-medium rounded-lg
+                  ${activeTab === item.tab
+                    ? 'bg-[#1B4965] text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                  }
+                `}
               >
                 <svg
-                  className="h-6 w-6"
+                  className="mr-3 h-6 w-6"
                   fill="none"
-                  viewBox="0 0 24 24"
                   stroke="currentColor"
-                >
-                  {isMenuOpen ? (
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  ) : (
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 6h16M4 12h16M4 18h16"
-                    />
-                  )}
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile Menu */}
-        <div
-          className={`${
-            isMenuOpen ? 'block' : 'hidden'
-          } md:hidden bg-white border-t border-gray-100`}
-        >
-          <div className="px-4 pt-2 pb-3 space-y-1">
-            <Link
-              to="/"
-              className="block px-3 py-2 rounded-md text-base font-medium text-[#1B4965] hover:text-[#62B6CB] hover:bg-gray-50"
-            >
-              Home
-            </Link>
-            <Link
-              to="/houses"
-              className="block px-3 py-2 rounded-md text-base font-medium text-[#1B4965] hover:text-[#62B6CB] hover:bg-gray-50"
-            >
-              Properties
-            </Link>
-            <Link
-              to="/contact"
-              className="block px-3 py-2 rounded-md text-base font-medium text-[#1B4965] hover:text-[#62B6CB] hover:bg-gray-50"
-            >
-              Contact
-            </Link>
-            <Link
-              to="/dashboard"
-              className="block px-3 py-2 rounded-md text-base font-medium text-[#1B4965] hover:text-[#62B6CB] hover:bg-gray-50"
-            >
-              Dashboard
-            </Link>
-            <button
-              onClick={async () => {
-                await supabase.auth.signOut()
-                navigate('/auth')
-              }}
-              className="w-full text-left px-3 py-2 rounded-md text-base font-medium text-[#1B4965] hover:text-[#62B6CB] hover:bg-gray-50"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-[#1B4965]">Dashboard</h1>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex space-x-4 mb-8">
-          <button
-            onClick={() => setActiveTab('listings')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              activeTab === 'listings'
-                ? 'bg-[#1B4965] text-white'
-                : 'text-[#1B4965] hover:bg-gray-100'
-            }`}
-          >
-            Listings
-          </button>
-          <button
-            onClick={() => setActiveTab('bookings')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              activeTab === 'bookings'
-                ? 'bg-[#1B4965] text-white'
-                : 'text-[#1B4965] hover:bg-gray-100'
-            }`}
-          >
-            Bookings
-          </button>
-          <button
-            onClick={() => setActiveTab('calendar')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              activeTab === 'calendar'
-                ? 'bg-[#1B4965] text-white'
-                : 'text-[#1B4965] hover:bg-gray-100'
-            }`}
-          >
-            Calendar
-          </button>
-        </div>
-
-        {/* Content */}
-        {activeTab === 'listings' ? (
-          <div>
-            {/* Add New Listing Button */}
-            <div className="mb-6">
-              <Link
-                to="/add-listing"
-                className="inline-flex items-center px-6 py-3 bg-[#1B4965] text-white rounded-lg hover:bg-[#62B6CB] transition-colors duration-300"
-              >
-                <svg 
-                  className="w-5 h-5 mr-2" 
-                  fill="none" 
-                  stroke="currentColor" 
                   viewBox="0 0 24 24"
                 >
-                  <path 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round" 
-                    strokeWidth="2" 
-                    d="M12 4v16m8-8H4"
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d={item.icon}
                   />
                 </svg>
-                Add New Listing
-              </Link>
-            </div>
-
-            {/* Existing Listings Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {listings.map((listing) => (
-                <div key={listing.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="relative aspect-[4/3]">
-                    <img
-                      src={listing.images?.[0]?.url || '/placeholder.jpg'}
-                      alt={listing.name}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div className="p-6">
-                    <h3 className="text-xl font-semibold text-[#1B4965] mb-2">{listing.name}</h3>
-                    <p className="text-gray-600 mb-4">{listing.location}</p>
-                    <div className="flex justify-between items-center">
-                      <span className="text-lg font-bold text-[#1B4965]">
-                        {formatTND(listing.prices?.[0]?.price_per_day || 0)}
-                      </span>
-                      <Link
-                        to={`/edit-listing/${listing.id}`}
-                        className="px-4 py-2 bg-[#1B4965] text-white rounded-lg hover:bg-[#62B6CB] transition-colors"
-                      >
-                        Edit
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : activeTab === 'bookings' ? (
-          <div className="space-y-6">
-            {bookings.map((booking) => (
-              <div key={booking.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                <div className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-xl font-semibold text-[#1B4965] mb-2">
-                        {booking.accommodations.name}
-                      </h3>
-                      <p className="text-gray-600">{booking.accommodations.location}</p>
-                      <div className="mt-4 space-y-2">
-                        <p className="text-gray-600">
-                          <span className="font-medium">Check-in:</span>{' '}
-                          {new Date(booking.start_date).toLocaleDateString()}
-                        </p>
-                        <p className="text-gray-600">
-                          <span className="font-medium">Check-out:</span>{' '}
-                          {new Date(booking.end_date).toLocaleDateString()}
-                        </p>
-                        <p className="text-gray-600">
-                          <span className="font-medium">Total:</span>{' '}
-                          {formatTND(booking.total_price)}
-                        </p>
-                        <p className="text-gray-600">
-                          <span className="font-medium">Status:</span>{' '}
-                          <span className={`
-                            ${booking.status === 'confirmed' ? 'text-green-600' :
-                              booking.status === 'pending' ? 'text-amber-600' :
-                              'text-red-600'}
-                          `}>
-                            {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  {booking.status === 'pending' && (
-                    <div className="mt-6 flex space-x-4">
-                      <button
-                        onClick={() => handleVerifyBooking(booking.id)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                      >
-                        Verify
-                      </button>
-                      <button
-                        onClick={() => handleCancelBooking(booking.id)}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
+                {item.name}
+              </button>
             ))}
           </div>
-        ) : (
-          renderCalendarContent()
-        )}
+          
+          {/* Add logout button at bottom */}
+          <div className="px-4 mb-6">
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-600 hover:bg-gray-100"
+            >
+              <svg
+                className="mr-3 h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                />
+              </svg>
+              Logout
+            </button>
+          </div>
+        </nav>
       </div>
+
+      {/* Main Content */}
+      <div className={`
+        transition-all duration-200 ease-in-out
+        lg:ml-64 min-h-screen
+        ${isMenuOpen ? 'ml-64' : 'ml-0'}
+      `}>
+        <div className="p-4 sm:p-6 lg:p-8">
+          <div className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate(-1)}
+                className="p-2 hover:bg-gray-100 rounded-full"
+                aria-label="Go back"
+              >
+                <svg
+                  className="h-6 w-6 text-[#1B4965]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </button>
+              <h1 className="text-2xl sm:text-3xl font-bold text-[#1B4965]">
+                {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+              </h1>
+            </div>
+            <button
+              className="lg:hidden"
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+            >
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            {loading ? (
+              <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1B4965]"></div>
+              </div>
+            ) : (
+              <>
+                {activeTab === 'overview' && <Overview bookings={bookings} listings={listings} />}
+                {activeTab === 'listings' && <Listings listings={listings} bookings={bookings} onDeleteListing={handleDeleteListing} />}
+                {activeTab === 'bookings' && <Bookings bookings={bookings} onBookingClick={handleBookingClick} />}
+                {activeTab === 'calendar' && <Calendar bookings={bookings} />}
+                {activeTab === 'messages' && <Messages messages={messages} />}
+                {activeTab === 'blog' && <Blog posts={blogPosts} categories={categories} onSavePost={handleSavePost} />}
+                {activeTab === 'settings' && <Settings user={currentUser} />}
+                {activeTab === 'rapport' && <Rapport rapportData={rapportData} />}
+                {activeTab === 'transactions' && <Transactions bookings={bookings} />}
+                {activeTab === 'checkouts' && <Checkouts bookings={bookings} onBookingClick={handleBookingClick} />}
+                {activeTab === 'users' && <Users users={users} currentUser={currentUser} onUpdateUserRole={handleUpdateUserRole} />}
+                {activeTab === 'newsletter' && <Newsletter />}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {isMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/25 bg-opacity-50 z-20 lg:hidden"
+          onClick={() => setIsMenuOpen(false)}
+        />
+      )}
     </div>
-  )
+  );
 }
 
-export default Dashboard
+export default Dashboard;
+
